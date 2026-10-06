@@ -16,21 +16,121 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download Strong 8K EPG
+      - name: Download source EPG
         run: |
           curl -L --fail --retry 3 \
-            "https://JohnPulse.github.io/iptv-epg/epg-strong8k.xml.gz" \
-            -o epg.xml.gz
+            -o source.xml.gz \
+            "https://github.com/ferteque/Curated-M3U-Repository/raw/refs/heads/main/epg6.xml.gz"
+          gunzip -f source.xml.gz
 
-      - name: Extract EPG
+      - name: Create Kids-only EPG
         run: |
-          gunzip -f epg.xml.gz
-          test -s epg.xml
+          python3 <<'PY'
+          import xml.etree.ElementTree as ET
+
+          wanted = [
+              "3ABN Kids Network",
+              "Adult Swim",
+              "Baby First",
+              "Baby TV",
+              "BabyTV",
+              "Bluey 24/7",
+              "Boomerang",
+              "Cartoon Network",
+              "Cartoonito",
+              "Chu Chu Tv",
+              "Disney Channel",
+              "Disney Junior",
+              "Disney Jr",
+              "Disney XD",
+              "Freeform",
+              "Game TV",
+              "Ludikids",
+              "MeTV Toons",
+              "Nick",
+              "Nick +1",
+              "Nick Jr",
+              "Nick Junior",
+              "Nick Junior +1",
+              "Nick Junior Too",
+              "Nick Spongebob",
+              "Nick Toons",
+              "Nicktoons",
+              "Nickelodeon",
+              "PBS",
+              "PBS Kids",
+              "Pop",
+              "Pop +1",
+              "Pop Max",
+              "Pop Max+1",
+              "Silver Screen Classics",
+              "Sky Kids",
+              "Teen Nick",
+              "Teletoon",
+              "Tiny Pop",
+              "Tiny Pop +1",
+              "Treehouse",
+              "Tree House",
+              "Universal Kids",
+              "YTV",
+              "Ytv East"
+          ]
+
+          tree = ET.parse("source.xml")
+          root = tree.getroot()
+
+          keep_ids = set()
+
+          # Match channels by their XMLTV display names.
+          for channel in root.findall("channel"):
+              names = [
+                  (n.text or "").strip().lower()
+                  for n in channel.findall("display-name")
+              ]
+
+              for name in names:
+                  if any(
+                      name == w.lower()
+                      or name.startswith(w.lower() + " ")
+                      for w in wanted
+                  ):
+                      keep_ids.add(channel.get("id"))
+                      break
+
+          print(f"Found {len(keep_ids)} matching XMLTV channel IDs")
+
+          for channel_id in sorted(keep_ids):
+              print(channel_id)
+
+          # Remove all non-kids channels.
+          for channel in list(root.findall("channel")):
+              if channel.get("id") not in keep_ids:
+                  root.remove(channel)
+
+          # Remove programmes belonging to removed channels.
+          for programme in list(root.findall("programme")):
+              if programme.get("channel") not in keep_ids:
+                  root.remove(programme)
+
+          tree.write(
+              "epg.xml",
+              encoding="UTF-8",
+              xml_declaration=True
+          )
+
+          print(f"Kids EPG created with {len(keep_ids)} channel IDs")
+          PY
 
       - name: Commit updated EPG
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add epg.xml
-          git diff --cached --quiet || git commit -m "Update Kids EPG"
-          git push
+
+          if git diff --cached --quiet; then
+            echo "No EPG changes"
+          else
+            git commit -m "Update Kids EPG"
+            git push
+          fi
