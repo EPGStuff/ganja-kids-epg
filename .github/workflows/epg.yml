@@ -27,87 +27,123 @@ jobs:
         run: |
           python3 <<'PY'
           import xml.etree.ElementTree as ET
-
-          wanted = [
-              "3ABN Kids Network",
-              "Adult Swim",
-              "Baby First",
-              "Baby TV",
-              "BabyTV",
-              "Bluey 24/7",
-              "Boomerang",
-              "Cartoon Network",
-              "Cartoonito",
-              "Chu Chu Tv",
-              "Disney Channel",
-              "Disney Junior",
-              "Disney Jr",
-              "Disney XD",
-              "Freeform",
-              "Game TV",
-              "Ludikids",
-              "MeTV Toons",
-              "Nick",
-              "Nick +1",
-              "Nick Jr",
-              "Nick Junior",
-              "Nick Junior +1",
-              "Nick Junior Too",
-              "Nick Spongebob",
-              "Nick Toons",
-              "Nicktoons",
-              "Nickelodeon",
-              "PBS",
-              "PBS Kids",
-              "Pop",
-              "Pop +1",
-              "Pop Max",
-              "Pop Max+1",
-              "Silver Screen Classics",
-              "Sky Kids",
-              "Teen Nick",
-              "Teletoon",
-              "Tiny Pop",
-              "Tiny Pop +1",
-              "Treehouse",
-              "Tree House",
-              "Universal Kids",
-              "YTV",
-              "Ytv East"
-          ]
+          import re
 
           tree = ET.parse("source.xml")
           root = tree.getroot()
 
+          # Only keep Kids channels from the countries used by
+          # our Kids / UK Kids / CA Kids groups.
+          allowed_countries = {"uk", "us", "ca"}
+
+          wanted_names = [
+              "3abn kids network",
+              "adult swim",
+              "baby first",
+              "babyfirst",
+              "baby tv",
+              "babytv",
+              "bluey",
+              "boomerang",
+              "cartoon network",
+              "cartoonito",
+              "chu chu tv",
+              "chuchu tv",
+              "disney channel",
+              "disney junior",
+              "disney jr",
+              "disney xd",
+              "freeform",
+              "game tv",
+              "gametv",
+              "ludikids",
+              "metv toons",
+              "nick",
+              "nick jr",
+              "nick junior",
+              "nick junior too",
+              "nicktoons",
+              "nick toons",
+              "nickelodeon",
+              "pbs kids",
+              "pop",
+              "pop max",
+              "sky kids",
+              "teen nick",
+              "teennick",
+              "teletoon",
+              "tiny pop",
+              "treehouse",
+              "universal kids",
+              "ytv"
+          ]
+
+          def clean(text):
+              text = (text or "").lower()
+              text = text.replace("&", "and")
+              text = re.sub(r"[^a-z0-9]+", " ", text)
+              return " ".join(text.split())
+
+          def country_from_id(channel_id):
+              channel_id = (channel_id or "").lower()
+              parts = channel_id.rsplit(".", 1)
+
+              if len(parts) == 2:
+                  return parts[1]
+
+              return ""
+
           keep_ids = set()
 
-          # Match channels by their XMLTV display names.
           for channel in root.findall("channel"):
+              channel_id = channel.get("id", "")
+              country = country_from_id(channel_id)
+
+              # Reject other countries
+              if country not in allowed_countries:
+                  continue
+
               names = [
-                  (n.text or "").strip().lower()
+                  clean(n.text)
                   for n in channel.findall("display-name")
+                  if n.text
               ]
 
+              matched = False
+
               for name in names:
-                  if any(
-                      name == w.lower()
-                      or name.startswith(w.lower() + " ")
-                      for w in wanted
-                  ):
-                      keep_ids.add(channel.get("id"))
+                  for wanted in wanted_names:
+                      w = clean(wanted)
+
+                      if (
+                          name == w
+                          or name.startswith(w + " ")
+                          or name == w + " hd"
+                          or name == w + " fhd"
+                      ):
+                          matched = True
+                          break
+
+                  if matched:
                       break
 
-          print(f"Found {len(keep_ids)} matching XMLTV channel IDs")
+              if matched:
+                  keep_ids.add(channel_id)
+
+          print("")
+          print("================================")
+          print(f"FOUND {len(keep_ids)} KIDS XMLTV IDs")
+          print("================================")
 
           for channel_id in sorted(keep_ids):
               print(channel_id)
 
-          # Remove all non-kids channels.
+          # Remove unwanted channel definitions
           for channel in list(root.findall("channel")):
               if channel.get("id") not in keep_ids:
                   root.remove(channel)
 
-          # Remove programmes belonging to removed channels.
+          # Remove programmes for unwanted channels
           for programme in list(root.findall("programme")):
               if programme.get("channel") not in keep_ids:
                   root.remove(programme)
@@ -118,7 +154,8 @@ jobs:
               xml_declaration=True
           )
 
-          print(f"Kids EPG created with {len(keep_ids)} channel IDs")
+          print("")
+          print("Kids-only epg.xml created successfully.")
           PY
 
       - name: Commit updated EPG
